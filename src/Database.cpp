@@ -1,3 +1,4 @@
+#include <iostream>
 #include "Database.h"
 
 Database::Database(const std::string& connectionString) : conn(connectionString) {}

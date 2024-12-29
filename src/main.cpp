@@ -1,8 +1,8 @@
 #include <iostream>
-#include "router.h"
+#include "Database.h"
 int main(){
-    Router router;
+    
 
-    std::cout << "Server is running..." << std::endl;
+    
     return 0;
 }
