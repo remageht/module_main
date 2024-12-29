@@ -1,7 +1,7 @@
-#include <iostream>
-#include "Database.h"
-#include "API.h"
-#include "third_party/cpp-httplib/httplib.h"
+
+#include "include/Database.h"
+#include "include/API.h"
+
 int main(){
       
     Database db("postgresql://user:password@localhost/dbname");// Инициализация базы данных
