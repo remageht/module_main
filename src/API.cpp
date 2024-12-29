@@ -1,4 +1,4 @@
-
+#include <iostream>
 #include "API.h"
 
 API::API(int port) : port(port) {}
