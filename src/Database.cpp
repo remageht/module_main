@@ -1,10 +1,7 @@
 
-#include "include/Database.h"
+#include "Database.h"
 
-Database::Database(const std::string& connectionString) : conn(connectionString) {}
-
-void Database::execute(const std::string& query) {
-    pqxx::work txn(conn);
-    txn.exec(query);
-    txn.commit();
+Database::Database(const std::string& connection_string) 
+    : conn(connection_string) {
+    // Проверка соединения и инициализация
 }
