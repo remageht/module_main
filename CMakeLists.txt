@@ -7,7 +7,6 @@ find_package(Threads REQUIRED)
 
 include_directories(include ) #заголовочные файлы
 include_directories(third_party/cpp-httplib ) # для API
-include_directories(third_party/nlohmann)
 include_directories(third_party/pqxx)#для PostgreSQL
 include_directories(third_party/catch2)# для юнит тестов
 include_directories(third_party/hiredis)# подключаем библиотеку hiredis
@@ -24,4 +23,4 @@ PRIVATE Threads::Threads
 PRIVATE pqxx
 PRIVATE httplib 
 PRIVATE hiredis
-PRIVATE nlohmann_json) #сделан отдельно от основного исполнямего файла
+) #сделан отдельно от основного исполнямего файла
