@@ -1,48 +1,7 @@
 # Файлы и директории, создаваемые системой сборки
 /build/
-/CMakeFiles/
-/CMakeCache.txt
-Makefile
-cmake_install.cmake
 
-# Конфигурационные файлы для IDE
-/.vscode/
-/.idea/
-/.vscode/settings.json
-.vscode/c_cpp_properties.json
 
 # Файлы и директории, содержащие библиотеки и зависимости
 /third_party/
-/vcpkg/
 
-# Файлы сборки
-*.o
-*.obj
-*.so
-*.dll
-*.dylib
-*.lib
-*.a
-*.exe
-
-# Логи
-*.log
-
-# Кэш
-*.cache
-*.pyc
-*.pyo
-*.swp
-
-# Настройки операционной системы
-.DS_Store
-Thumbs.db
-
-# Игнорирование по шаблону
-*.tmp
-*.bak
-*~
-
-# Другие файлы
-*.iml
-*.user
