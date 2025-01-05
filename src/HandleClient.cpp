@@ -1,4 +1,4 @@
-#include "handleClient.h"
+#include "HandleClient.h"
 
 void handleClient(SOCKET clientSocket) {
     std::cout << "New connection on socket " << clientSocket << std::endl;
