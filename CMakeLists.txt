@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 find_package(Threads REQUIRED)
 
-include_directories(include)
+
 include_directories(third_party/cpp-httplib)
 include_directories(third_party/nlohmann/single_include) #библиотека nlohmann/json
 include_directories(third_party/pqxx/include)
