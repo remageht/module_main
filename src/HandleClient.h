@@ -1,24 +1,13 @@
-#ifndef DATABASE_H
-#define DATABASE_H
+#pragma once
+#include "simpleFunctions.h"
 
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#pragma comment(lib, "ws2_32.lib")
+
+#include <winsock2.h>
 #include <string>
-#include <pqxx/pqxx>
-#include <hiredis/hiredis.h>
-#include <nlohmann/json.hpp>
+#include <vector>
+#include <thread>
 
-class Database {
-public:
-    Database(const std::string& pg_connection_string, const std::string& redis_host, int redis_port);
-    ~Database();
+void handleClient(SOCKET clientSocket);
 
-    void createTest(const std::string& name);
-    std::string getRedisValue(const std::string& key);
-    void setRedisValue(const std::string& key, const std::string& value);
-    // Другие методы для работы с базой данных
-
-private:
-    pqxx::connection pg_conn;
-    redisContext* redis_conn;
-};
-
-#endif 

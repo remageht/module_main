@@ -3,23 +3,21 @@ project(MainModule)
 
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(Threads REQUIRED)
 
+# пути для поиска заголовочных файлов и бинарных файлов
+set(OpenSSL_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/src/lib/include/openssl")
+set(OpenSSL_LIBRARIES "${CMAKE_SOURCE_DIR}/src/lib/lib")
+#путь для jwt-cpp
+set(jwt-cpp_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/src/lib/include/jwt-cpp")
 
+add_executable(main_module 
+  src/main.cpp
+  src/handleClient.cpp
+)
 
-include_directories(third_party/nlohmann/single_include) #библиотека nlohmann/json
-include_directories(third_party/pqxx/include)
-include_directories(third_party/hiredis)
-include_directories(third_party/catch2)
-
-add_executable(module_main src/main.cpp src/API.cpp src/Database.cpp)
-
-
-target_link_libraries(module_main
-    PRIVATE Threads::Threads
-    PRIVATE pqxx
-    PRIVATE hiredis
-    
+target_link_libraries(main_module PRIVATE
+  ${OpenSSL_LIBRARIES}/libcrypto.lib
+  ${jwt-cpp_LIBRARIES}
 )
 
 
