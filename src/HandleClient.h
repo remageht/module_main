@@ -1,4 +1,5 @@
 #pragma once
+#include "CheckToken.h"
 #include "SimpleFunctions.h"
 
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
