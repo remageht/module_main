@@ -2,7 +2,7 @@
 #pragma comment(lib, "ws2_32.lib")
 
 #include "HandleClient.h"	//		работа с клиентом
-#include "getAddress.h"		//		получение айпи устройства в локальной сети
+#include "GetAddress.h"		//		получение айпи устройства в локальной сети
 
 #include <winsock2.h>
 #include <vector>
@@ -19,7 +19,7 @@ int main()
 {
 	//		ЗАГРУЗКА СЕТЕВОЙ БИБЛИОТЕКИ
 
-	std::cout << "Load static_lib...       ";
+	std::cout << "Load _lib...       ";
 
 	WSADATA wsaData;
 	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
@@ -49,12 +49,12 @@ int main()
 	//		ОПРЕДЕЛЕНИЕ АДРЕСА
 	//		если не вызывать сервер запустится на локалхосте
 
-	//		ADRES = getLocalIPAddress();
+	//		ADDRESS = getLocalIPAddress();
 
 
 	//		ПРИСВАИВАНИЕ АДРЕСА И ПОРТА
 
-	std::cout << "Adres and port... ";
+	std::cout << "Address and port... ";
 
 	sockaddr_in serverAddr = {};
 	serverAddr.sin_family = AF_INET;
@@ -65,8 +65,8 @@ int main()
 	std::cout << "Done.\n";
 
 
-	//		ПРОСЛУШИВАНИЕ ПОРТА
-	//		по сути с этого момента сервер можно называть запущенным
+	//		ПРОСЛУШИВАНИЕ ПОРТА(сервер считается запущенным)
+	
 
 	listen(serverSocket, SOMAXCONN);
 
