@@ -4,30 +4,35 @@
 #include <iostream>
 
 
-inline std::string findToken(std::string message)
+inline std::string findToken(const std::string& message)
 {
-    std::string token = "";
+    static const size_t kMaxTokenLen = 8192;
 
     size_t bearerPos = message.find("Bearer ");
-    if (bearerPos != std::string::npos) {
-        token = message.substr(bearerPos + 7);
+    if (bearerPos == std::string::npos) {
+        return "";
     }
 
-    size_t cut_pos = token.size();
-    if (token.find(' ') != std::string::npos) {
-        if (cut_pos > token.find(' '))
-            cut_pos = token.find(' ');
-    }
-    if (token.find(' ') != std::string::npos) {
-        if (cut_pos > token.find('\n'))
-            cut_pos = token.find('\n');
-    }
-    if (token.find(' ') != std::string::npos) {
-        if (cut_pos > token.find('\r'))
-            cut_pos = token.find('\r');
+    size_t start = bearerPos + 7;
+    if (start >= message.size()) {
+        return "";
     }
 
-    token = token.substr(0, cut_pos);
+    // Токен заканчивается на первом разделителе: пробел, \n, \r, \t или '"'
+    size_t cut_pos = message.size();
+    for (char delim : {' ', '\n', '\r', '\t', '"', '\''}) {
+        size_t p = message.find(delim, start);
+        if (p != std::string::npos && p < cut_pos) {
+            cut_pos = p;
+        }
+    }
+
+    std::string token = message.substr(start, cut_pos - start);
+
+    // Отсекаем возможный префикс "Bearer " повторно и ограничиваем длину
+    if (token.size() > kMaxTokenLen) {
+        token.resize(kMaxTokenLen);
+    }
 
     return token;
 }

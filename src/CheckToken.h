@@ -2,6 +2,7 @@
 
 #include <jwt-cpp/jwt.h>
 #include <chrono>
+#include <cstdlib>
 #include <string>
 
 #define _WINSOCK_DEPRECATED_NO_WARNINGS

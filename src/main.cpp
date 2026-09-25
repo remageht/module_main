@@ -2,21 +2,29 @@
 #pragma comment(lib, "ws2_32.lib")
 
 #include "HandleClient.h"	//		работа с клиентом
-#include "GetAddress.h"		//		получение айпи устройства в локальной сети
+#include "getAddress.h"		//		получение айпи устройства в локальной сети
 
 #include <winsock2.h>
-#include <vector>
+#include <ws2tcpip.h>
+#include <atomic>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <iostream>
 
 const char* ADRES = "127.0.0.1";	//	локалхост в коде меняется на текущий адрес устройства в локальной сети (можно будет подключиться с другого устройства)
 #define PORT  1111
+#define MAX_CLIENT_THREADS 128
 
 
 
 int main()
 {
+	//		ПРОВЕРКА КОНФИГУРАЦИИ (secrets только через env, fail fast с понятной ошибкой)
+	if (std::getenv("JWT_SECRET") == nullptr) {
+		std::cerr << "WARNING: JWT_SECRET is not set. Token verification will reject all requests (fail closed)." << std::endl;
+		std::cerr << "Set JWT_SECRET env var, see .env.example." << std::endl;
+	}
 	//		ЗАГРУЗКА СЕТЕВОЙ БИБЛИОТЕКИ
 
 	std::cout << "Load _lib...       ";
@@ -58,9 +66,20 @@ int main()
 
 	sockaddr_in serverAddr = {};
 	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_addr.s_addr = inet_addr(ADRES);
+	// inet_pton вместо deprecated inet_addr, с проверкой результата.
+	if (inet_pton(AF_INET, ADRES, &serverAddr.sin_addr) != 1) {
+		std::cout << "Error: bad address.\n";
+		closesocket(serverSocket);
+		WSACleanup();
+		return 1;
+	}
 	serverAddr.sin_port = htons(PORT);
-	bind(serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr));
+	if (bind(serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
+		std::cout << "Error: bind failed (" << WSAGetLastError() << ").\n";
+		closesocket(serverSocket);
+		WSACleanup();
+		return 1;
+	}
 
 	std::cout << "Done.\n";
 
@@ -68,7 +87,12 @@ int main()
 	//		ПРОСЛУШИВАНИЕ ПОРТА(сервер считается запущенным)
 	
 
-	listen(serverSocket, SOMAXCONN);
+	if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR) {
+		std::cout << "Error: listen failed (" << WSAGetLastError() << ").\n";
+		closesocket(serverSocket);
+		WSACleanup();
+		return 1;
+	}
 
 	std::cout << "\nServer started" << std::endl << std::endl;
 	std::cout << "Address - " << ADRES << std::endl;
@@ -78,7 +102,7 @@ int main()
 
 	//		ОБРАБОТКА ПОПЫТКИ ПОДКЛЮЧЕНИЯ
 
-	std::vector<std::thread> clientThreads;
+	std::atomic<int> activeClients{ 0 };
 
 	while (true)
 	{
@@ -90,11 +114,30 @@ int main()
 			continue;
 		}
 
-		// Запуск нового потока для обработки клиента
-		clientThreads.emplace_back(std::thread(handleClient, clientSocket));
+		// Защита от исчерпания ресурсов: thread-per-connection без лимита = DoS.
+		if (activeClients.load() >= MAX_CLIENT_THREADS) {
+			std::cerr << "Too many clients, rejecting socket " << clientSocket << std::endl;
+			closesocket(clientSocket);
+			continue;
+		}
+
+		// Таймаут recv против slow-loris / зависших соединений (30 c).
+		DWORD recvTimeoutMs = 30000;
+		setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO,
+			reinterpret_cast<const char*>(&recvTimeoutMs), sizeof(recvTimeoutMs));
+
+		// Запуск нового потока для обработки клиента.
+		// detach вместо вечно растущего vector<thread>: иначе terminate() на joinable thread
+		// и утечка потоков. Счётчик активных клиентов ограничивает нагрузку.
+		activeClients.fetch_add(1);
+		std::thread([clientSocket, &activeClients]() {
+			handleClient(clientSocket);
+			activeClients.fetch_sub(1);
+		}).detach();
 	}
 
-	std::cout << "test";
+	closesocket(serverSocket);
+	WSACleanup();
 
 	return 0;
 }
