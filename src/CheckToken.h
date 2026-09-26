@@ -4,11 +4,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
-#pragma comment(lib, "ws2_32.lib")
-
-#include <winsock2.h>
+#include "NetCompat.h"
 #include "SimpleFunctions.h"
 #include "FindToken.h"
 
@@ -76,6 +74,19 @@ enum class Action {
     Error403            //недостаточно прав для действия
 };
 
+// Gateway auth result: signature/exp/issuer verification + extracted identity.
+struct AuthInfo {
+    bool ok = false;
+    std::string sub;                        // JWT "sub" (user id)
+    std::vector<std::string> roles;         // JWT "roles" (["admin", ...])
+    std::vector<std::string> permissions;   // JWT "permissions" (["users:read", ...])
+    std::string error;                      // machine-readable reason when !ok
+};
 
+// Verify HS256 signature + exp (+ iss when requiredIssuer is non-empty).
+// Never throws; never logs the token itself (callers must use maskToken).
+AuthInfo verifyJwt(const std::string& token,
+                   const std::string& secret,
+                   const std::string& requiredIssuer);
 
 Action CheckToken(SOCKET clientSocket, char* message, int msgSize);

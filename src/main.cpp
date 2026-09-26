@@ -1,143 +1,167 @@
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
-#pragma comment(lib, "ws2_32.lib")
+// module_main v1: HTTP/JSON API gateway.
+// Listens on BIND:PORT, verifies JWT, routes /api/<area>/... to upstream
+// modules. See docs/API_CONTRACT.md. All config comes from environment.
 
-#include "HandleClient.h"	//		работа с клиентом
-#include "getAddress.h"		//		получение айпи устройства в локальной сети
-
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <atomic>
+#include <chrono>
+#include <csignal>
 #include <cstdlib>
+#include <iostream>
 #include <string>
 #include <thread>
-#include <iostream>
 
-const char* ADRES = "127.0.0.1";	//	локалхост в коде меняется на текущий адрес устройства в локальной сети (можно будет подключиться с другого устройства)
-#define PORT  1111
-#define MAX_CLIENT_THREADS 128
+#include "Config.h"
+#include "HandleClient.h"
+#include "Logger.h"
+#include "NetCompat.h"
+#include "Router.h"
+#include "getAddress.h"
 
+namespace {
+volatile std::sig_atomic_t g_running = 1;
+void onSignal(int) { g_running = 0; }
 
+std::string peerIp(SOCKET s) {
+    sockaddr_in addr = {};
+    socklen_t len = sizeof(addr);
+    if (getpeername(s, reinterpret_cast<sockaddr*>(&addr), &len) != 0) return "unknown";
+    char buf[INET_ADDRSTRLEN] = {0};
+    if (inet_ntop(AF_INET, &addr.sin_addr, buf, sizeof(buf)) == nullptr) return "unknown";
+    return std::string(buf);
+}
 
-int main()
-{
-	//		ПРОВЕРКА КОНФИГУРАЦИИ (secrets только через env, fail fast с понятной ошибкой)
-	if (std::getenv("JWT_SECRET") == nullptr) {
-		std::cerr << "WARNING: JWT_SECRET is not set. Token verification will reject all requests (fail closed)." << std::endl;
-		std::cerr << "Set JWT_SECRET env var, see .env.example." << std::endl;
-	}
-	//		ЗАГРУЗКА СЕТЕВОЙ БИБЛИОТЕКИ
+bool waitReadable(SOCKET listener) {
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(listener, &rfds);
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 500 * 1000;  // 500 ms poll so Ctrl+C is noticed promptly
+#ifdef _WIN32
+    int rc = select(0, &rfds, nullptr, nullptr, &tv);
+#else
+    int rc = select(listener + 1, &rfds, nullptr, nullptr, &tv);
+#endif
+    return rc > 0;
+}
+}  // namespace
 
-	std::cout << "Load _lib...       ";
+int main() {
+    using gateway::LogLevel;
 
-	WSADATA wsaData;
-	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-		std::cout << "Error.\n";
-		return 1;
-	}
-	else {
-		std::cout << "Done.\n";
-	}
+    // ---- 1. Config (fail fast with a clear error, never start half-configured).
+    gateway::ConfigResult cfgRes = gateway::loadConfig();
+    if (!cfgRes.ok) {
+        std::cerr << "Config error: " << cfgRes.error << std::endl;
+        return 1;
+    }
+    const gateway::Config& cfg = cfgRes.cfg;
+    gateway::setLogLevel(cfg.logLevel);
 
+    std::signal(SIGINT, onSignal);
+    std::signal(SIGTERM, onSignal);
 
-	//		СОЗДАНИЕ СОКЕТА СЕРВЕРА
+    // ---- 2. Network init.
+    if (!net_init()) {
+        std::cerr << "Network init failed." << std::endl;
+        return 1;
+    }
 
-	std::cout << "Create socket...  ";
+    // ---- 3. Listener on BIND:PORT (IPv4).
+    SOCKET listener = kInvalidSock;
+    {
+        struct addrinfo hints = {};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        struct addrinfo* list = nullptr;
+        std::string portStr = std::to_string(cfg.port);
+        if (getaddrinfo(cfg.bind.c_str(), portStr.c_str(), &hints, &list) != 0 ||
+            list == nullptr) {
+            std::cerr << "Cannot resolve bind address '" << cfg.bind << "'." << std::endl;
+            net_cleanup();
+            return 1;
+        }
+        for (struct addrinfo* ai = list; ai != nullptr; ai = ai->ai_next) {
+            SOCKET s = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+            if (s == kInvalidSock) continue;
+#ifdef _WIN32
+            const char reuse = 1;
+#else
+            int reuse = 1;
+#endif
+            setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+            if (bind(s, ai->ai_addr, static_cast<int>(ai->ai_addrlen)) == 0 &&
+                listen(s, SOMAXCONN) == 0) {
+                listener = s;
+                break;
+            }
+            gateway::gwLog(LogLevel::Debug, -1,
+                           "bind/listen failed: " + std::to_string(net_last_error()));
+            close_socket(s);
+        }
+        freeaddrinfo(list);
+    }
+    if (listener == kInvalidSock) {
+        std::cerr << "Cannot listen on " << cfg.bind << ":" << cfg.port
+                  << " (err " << net_last_error() << "). Port busy?" << std::endl;
+        net_cleanup();
+        return 1;
+    }
 
-	SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (serverSocket == INVALID_SOCKET) {
-		std::cout << "Error.\n";
-		WSACleanup();
-		return 1;
-	}
-	else {
-		std::cout << "Done.\n";
-	}
+    // ---- 4. Banner (no secrets here).
+    std::cout << "module_main gateway v" << gateway::kGatewayVersion << " started\n"
+              << "Listen:    http://" << cfg.bind << ":" << cfg.port << "/\n"
+              << "Health:    http://" << cfg.bind << ":" << cfg.port << "/health\n"
+              << "Log level: " << cfg.logLevel << "\n"
+              << "Upstreams:\n";
+    for (const auto& area : gateway::apiAreas()) {
+        std::string up = cfg.upstreamFor(area);
+        std::cout << "  /api/" << area << "/* -> "
+                  << (up.empty() ? "(not configured, 502 at runtime)" : up) << "\n";
+    }
+    std::cout << "Local IP in LAN: " << getLocalIPAddress() << std::endl << std::endl;
 
+    // ---- 5. Accept loop with graceful shutdown.
+    gateway::RateLimiter limiter(cfg.rateLimitPerMin);
+    std::atomic<int> activeClients{0};
+    std::atomic<long long> connSeq{0};
 
-	//		ОПРЕДЕЛЕНИЕ АДРЕСА
-	//		если не вызывать сервер запустится на локалхосте
+    while (g_running) {
+        if (!waitReadable(listener)) continue;  // timeout or select error -> re-check flag
+        sockaddr_in clientAddr = {};
+        socklen_t clientLen = sizeof(clientAddr);
+        SOCKET cs = accept(listener, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
+        if (cs == kInvalidSock) {
+            if (g_running)
+                gateway::gwLog(LogLevel::Warn, -1,
+                               "accept failed: " + std::to_string(net_last_error()));
+            continue;
+        }
+        if (activeClients.load() >= cfg.maxClients) {
+            gateway::gwLog(LogLevel::Warn, -1, "Too many clients, connection rejected.");
+            close_socket(cs);
+            continue;
+        }
+        if (!set_recv_timeout(cs, cfg.recvTimeoutMs)) {
+            gateway::gwLog(LogLevel::Warn, -1, "Cannot set recv timeout, closing.");
+            close_socket(cs);
+            continue;
+        }
+        std::string ip = peerIp(cs);
+        long long id = connSeq.fetch_add(1) + 1;
+        activeClients.fetch_add(1);
+        std::thread([cs, ip, id, &cfg, &limiter, &activeClients]() {
+            handleClient(cs, ip, cfg, limiter, id);
+            activeClients.fetch_sub(1);
+        }).detach();
+    }
 
-	//		ADDRESS = getLocalIPAddress();
-
-
-	//		ПРИСВАИВАНИЕ АДРЕСА И ПОРТА
-
-	std::cout << "Address and port... ";
-
-	sockaddr_in serverAddr = {};
-	serverAddr.sin_family = AF_INET;
-	// inet_pton вместо deprecated inet_addr, с проверкой результата.
-	if (inet_pton(AF_INET, ADRES, &serverAddr.sin_addr) != 1) {
-		std::cout << "Error: bad address.\n";
-		closesocket(serverSocket);
-		WSACleanup();
-		return 1;
-	}
-	serverAddr.sin_port = htons(PORT);
-	if (bind(serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
-		std::cout << "Error: bind failed (" << WSAGetLastError() << ").\n";
-		closesocket(serverSocket);
-		WSACleanup();
-		return 1;
-	}
-
-	std::cout << "Done.\n";
-
-
-	//		ПРОСЛУШИВАНИЕ ПОРТА(сервер считается запущенным)
-	
-
-	if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR) {
-		std::cout << "Error: listen failed (" << WSAGetLastError() << ").\n";
-		closesocket(serverSocket);
-		WSACleanup();
-		return 1;
-	}
-
-	std::cout << "\nServer started" << std::endl << std::endl;
-	std::cout << "Address - " << ADRES << std::endl;
-	std::cout << "Port    - " << PORT << std::endl;
-	std::cout << "Link    - " << "http://" << ADRES << ':' << PORT << '/' << std::endl << std::endl;
-
-
-	//		ОБРАБОТКА ПОПЫТКИ ПОДКЛЮЧЕНИЯ
-
-	std::atomic<int> activeClients{ 0 };
-
-	while (true)
-	{
-		sockaddr_in clientAddr;
-		int clientAddrSize = sizeof(clientAddr);
-		SOCKET clientSocket = accept(serverSocket, (sockaddr*)&clientAddr, &clientAddrSize);
-		if (clientSocket == INVALID_SOCKET) {
-			std::cerr << "Accept failed: " << WSAGetLastError() << std::endl;
-			continue;
-		}
-
-		// Защита от исчерпания ресурсов: thread-per-connection без лимита = DoS.
-		if (activeClients.load() >= MAX_CLIENT_THREADS) {
-			std::cerr << "Too many clients, rejecting socket " << clientSocket << std::endl;
-			closesocket(clientSocket);
-			continue;
-		}
-
-		// Таймаут recv против slow-loris / зависших соединений (30 c).
-		DWORD recvTimeoutMs = 30000;
-		setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO,
-			reinterpret_cast<const char*>(&recvTimeoutMs), sizeof(recvTimeoutMs));
-
-		// Запуск нового потока для обработки клиента.
-		// detach вместо вечно растущего vector<thread>: иначе terminate() на joinable thread
-		// и утечка потоков. Счётчик активных клиентов ограничивает нагрузку.
-		activeClients.fetch_add(1);
-		std::thread([clientSocket, &activeClients]() {
-			handleClient(clientSocket);
-			activeClients.fetch_sub(1);
-		}).detach();
-	}
-
-	closesocket(serverSocket);
-	WSACleanup();
-
-	return 0;
+    std::cout << "\nShutting down, waiting for active connections..." << std::endl;
+    close_socket(listener);
+    for (int i = 0; i < 100 && activeClients.load() > 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    net_cleanup();
+    std::cout << "Stopped." << std::endl;
+    return 0;
 }

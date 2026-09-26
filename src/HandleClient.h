@@ -1,14 +1,14 @@
 #pragma once
-#include "CheckToken.h"
-#include "SimpleFunctions.h"
+// Per-connection gateway pipeline:
+// read HTTP request -> rate limit -> route -> auth -> proxy -> respond.
+// One request per connection (Connection: close).
 
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
-#pragma comment(lib, "ws2_32.lib")
-
-#include <winsock2.h>
 #include <string>
-#include <vector>
-#include <thread>
 
-void handleClient(SOCKET clientSocket);
+#include "NetCompat.h"
+#include "Config.h"
+#include "RateLimiter.h"
 
+void handleClient(SOCKET clientSocket, const std::string& clientIp,
+                  const gateway::Config& cfg, gateway::RateLimiter& limiter,
+                  long long connId);

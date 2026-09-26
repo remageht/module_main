@@ -5,9 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Вендорные include-директории (openssl + jwt-cpp лежат в src/lib).
-# NOTE: для Linux/macOS лучше перейти на find_package(OpenSSL) + FetchContent(jwt-cpp),
-# текущий вариант сохраняет совместимость с существующей структурой репо.
+# Vendor include dirs (openssl + jwt-cpp + picojson live under src/lib).
+# NOTE: long-term prefer find_package(OpenSSL) + FetchContent(jwt-cpp);
+# this keeps compatibility with the existing repo layout.
 set(VENDOR_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/src/lib/include")
 set(VENDOR_STATIC_LIB_DIR "${CMAKE_SOURCE_DIR}/src/lib/static_lib")
 
@@ -15,6 +15,9 @@ add_executable(main_module
   src/main.cpp
   src/HandleClient.cpp
   src/CheckToken.cpp
+  src/Http.cpp
+  src/Router.cpp
+  src/Proxy.cpp
   src/getAddress.cpp
 )
 
@@ -26,9 +29,9 @@ target_include_directories(main_module PRIVATE
 find_package(Threads REQUIRED)
 
 if(WIN32)
-  # ws2_32 нужен MinGW и MSVC; pragma comment покрывает только MSVC.
+  # ws2_32 needed by MinGW and MSVC; pragma comment covers MSVC only.
   target_link_libraries(main_module PRIVATE ws2_32 Threads::Threads)
-  # Линкуем вендорный libcrypto только если файл реально существует (Windows-сборка).
+  # Link vendored libcrypto only when the file really exists (Windows build).
   if(EXISTS "${VENDOR_STATIC_LIB_DIR}/libcrypto.lib")
     target_link_libraries(main_module PRIVATE "${VENDOR_STATIC_LIB_DIR}/libcrypto.lib")
   endif()

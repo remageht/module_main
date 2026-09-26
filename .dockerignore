@@ -1,0 +1,6 @@
+.git
+build/
+.env
+tests/
+docs/
+.vscode/

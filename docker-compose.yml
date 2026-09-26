@@ -1,0 +1,24 @@
+# Production compose for the gateway. Downstream modules plug in via
+# MODULE_*_URL (see docs/INTEGRATION.md section 4 + .env.example).
+services:
+  gateway:
+    build: .
+    ports:
+      - "${PORT:-1111}:${PORT:-1111}"
+    env_file:
+      - .env
+    environment:
+      BIND: 0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:1111/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Example downstream module (uncomment when its image exists):
+  # module_users:
+  #   image: your-registry/module_users:latest
+  #   expose: ["8081"]
+  #   restart: unless-stopped
